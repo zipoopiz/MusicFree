@@ -1,0 +1,71 @@
+name: 构建测试 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/build-apk]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        # package.json 与 package-lock.json 不同步，npm ci 会报错，这里用 npm install
+        run: npm install --no-audit --prefer-offline
+
+      - name: Generate local keystore
+        run: |
+          keytool -genkeypair -v -storetype PKCS12 \
+            -keystore android/app/release.keystore \
+            -alias musicfree-local -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass musicfreelocal -keypass musicfreelocal \
+            -dname "CN=MusicFree Local, OU=Dev, O=Local, C=CN"
+          cat > android/keystore.properties << 'EOF'
+          RELEASE_STORE_FILE=release.keystore
+          RELEASE_STORE_PASSWORD=musicfreelocal
+          RELEASE_KEY_ALIAS=musicfree-local
+          RELEASE_KEY_PASSWORD=musicfreelocal
+          EOF
+
+      - name: Build release APK
+        run: |
+          cd android
+          ./gradlew assembleRelease --parallel --build-cache
+
+      - name: List generated APKs
+        run: find android/app/build/outputs/apk -name '*.apk' -exec ls -lh {} \;
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MusicFree-release-apks
+          path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
+
+      - name: Create release with APKs
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v0.6.2-local.${{ github.run_number }}"
+          gh release create "$TAG" android/app/build/outputs/apk/release/*.apk \
+            --title "MusicFree 0.6.2 本地构建 #${{ github.run_number }}" \
+            --notes "由 GitHub Actions 自动构建的测试 APK（每次构建使用临时生成的签名，仅供本地测试，非官方发布）。"
