@@ -278,7 +278,7 @@
     "basicSettings.lyric.showStatusBarLyric": "Enable desktop lyrics",
     "basicSettings.lyric.showCarLyric": "Car Bluetooth lyrics",
     "basicSettings.lyric.carLyric.off": "Off",
-    "basicSettings.lyric.carLyric.lineByLine": "Line-by-line title (works on all head units)",
+    "basicSettings.lyric.carLyric.lineByLine": "Line-by-line lyrics (QQ Music style, artist field)",
     "basicSettings.lyric.carLyric.fullLyric": "Full lyric (newer head units only)",
     "basicSettings.lyric.align": "Alignment",
     "basicSettings.lyric.align.left": "Left",

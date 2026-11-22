@@ -11,7 +11,11 @@ export type CarLyricMode = "off" | "lineByLine" | "fullLyric";
  * 空字符串表示清除对应字段的覆盖，恢复原始元数据。
  */
 export interface ICarLyricChannel {
-    updateNowPlayingTitles(titles: { title?: string; lyric?: string }): void;
+    updateNowPlayingTitles(titles: {
+        title?: string;
+        artist?: string;
+        lyric?: string;
+    }): void;
 }
 
 /**
@@ -31,8 +35,9 @@ export function composeCarLyricTitle(
 }
 
 /**
- * 歌词行变化时调用。仅逐行标题模式生效：把当前行写入媒体元数据的 title 字段，
- * 通知仍显示歌名；无当前行时恢复原始 title。
+ * 歌词行变化时调用。仅逐行歌词模式生效：把当前行写入媒体元数据的 artist 字段
+ * （QQ音乐式——歌名保持不变，车机与系统卡片渲染「歌名 + 歌手」时即显示歌词）；
+ * 无当前行时恢复原始 artist。
  */
 export function pushCarLyricLine(
     channel: ICarLyricChannel | null | undefined,
@@ -44,7 +49,7 @@ export function pushCarLyricLine(
         return;
     }
     channel.updateNowPlayingTitles({
-        title: composeCarLyricTitle(lineItem, showTranslation) ?? "",
+        artist: composeCarLyricTitle(lineItem, showTranslation) ?? "",
     });
 }
 
@@ -64,11 +69,11 @@ export function pushCarLyricFullLyric(
 }
 
 /**
- * 恢复原始元数据：清空 title 与 lyric 两个字段的覆盖。
+ * 恢复原始元数据：清空 title、artist 与 lyric 三个字段的覆盖。
  * 在切歌、暂停、无歌词等时机调用；原生通道缺失时静默降级。
  */
 export function resetCarLyric(
     channel: ICarLyricChannel | null | undefined,
 ): void {
-    channel?.updateNowPlayingTitles({ title: "", lyric: "" });
+    channel?.updateNowPlayingTitles({ title: "", artist: "", lyric: "" });
 }

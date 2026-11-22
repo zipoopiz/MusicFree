@@ -33,7 +33,7 @@ index b2409a0..1b61ec0 100644
      fun removeUpcomingTracks(callback: Promise) = scope.launch {
          if (verifyServiceBoundOrReject(callback)) return@launch
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
-index 9d6d869..8fab66b 100644
+index 9d6d869..7982539 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 @@ -9,7 +9,10 @@ import android.os.Binder
@@ -55,7 +55,7 @@ index 9d6d869..8fab66b 100644
  import kotlin.system.exitProcess
  import timber.log.Timber
  
-@@ -93,6 +97,13 @@ class MusicService : HeadlessJsTaskService() {
+@@ -93,6 +97,14 @@ class MusicService : HeadlessJsTaskService() {
      private var notificationCapabilities: List<Capability> = emptyList()
      private var compactCapabilities: List<Capability> = emptyList()
  
@@ -63,19 +63,22 @@ index 9d6d869..8fab66b 100644
 +    // 覆盖状态绑定当前曲目的 audioUrl：切歌后自动失效，由 JS 在歌词就绪后重新推送
 +    private var carLyricBoundUrl: String? = null
 +    private var carLyricTitle: String? = null
++    private var carLyricArtist: String? = null
 +    private var carLyricLyric: String? = null
 +    private var carLyricProviderInstalled = false
 +
      override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
          startTask(getTaskConfig(intent))
          startAndStopEmptyNotificationToAvoidANR()
-@@ -441,6 +452,107 @@ class MusicService : HeadlessJsTaskService() {
+@@ -441,6 +453,114 @@ class MusicService : HeadlessJsTaskService() {
          player.notificationManager.hideNotification()
      }
  
 +    /**
 +     * 车载蓝牙歌词：更新媒体会话元数据（经蓝牙 AVRCP 同步给车机）。
-+     * - title: 当前行歌词，覆盖会话元数据的 title 字段（系统通知仍显示歌名）；
++     * - artist: 当前行歌词（QQ音乐式），覆盖会话元数据的 artist/副标题字段，
++     *   歌名保持不变，车机渲染「歌名 + 歌手」时即显示歌词；
++     * - title: 备用通道，覆盖会话元数据的 title 字段；
 +     * - lyric: 整篇歌词，写入会话元数据的歌词字段，由支持解析的车机自行滚动显示。
 +     * 空字符串表示清除对应字段的覆盖，恢复原始元数据。
 +     */
@@ -84,6 +87,7 @@ index 9d6d869..8fab66b 100644
 +        if (!::player.isInitialized) return
 +        carLyricBoundUrl = (player.currentItem as? TrackAudioItem)?.audioUrl
 +        carLyricTitle = titles.getString("title")?.takeIf { it.isNotEmpty() }
++        carLyricArtist = titles.getString("artist")?.takeIf { it.isNotEmpty() }
 +        carLyricLyric = titles.getString("lyric")?.takeIf { it.isNotEmpty() }
 +        installCarLyricMetadataProvider()
 +        applyCarLyricNow()
@@ -117,6 +121,10 @@ index 9d6d869..8fab66b 100644
 +        carLyricTitle?.let {
 +            metadata = metadata.withString(MediaMetadataCompat.METADATA_KEY_TITLE, it)
 +            metadata = metadata.withString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, it)
++        }
++        carLyricArtist?.let {
++            metadata = metadata.withString(MediaMetadataCompat.METADATA_KEY_ARTIST, it)
++            metadata = metadata.withString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, it)
 +        }
 +        carLyricLyric?.let {
 +            metadata = metadata.withString("android.media.metadata.LYRICS", it)

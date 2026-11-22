@@ -64,14 +64,14 @@ describe("车载蓝牙歌词 - composeCarLyricTitle（逐行标题模式的标�
     });
 });
 
-describe("车载蓝牙歌词 - 逐行标题模式（pushCarLyricLine）", () => {
+describe("车载蓝牙歌词 - 逐行歌词模式（pushCarLyricLine）", () => {
     it("off 模式不调用任何通道", () => {
         const { channel, calls } = makeChannel();
         pushCarLyricLine(channel, "off", { lrc: "夜空中最亮的星" }, false);
         expect(calls).toHaveLength(0);
     });
 
-    it("lineByLine 模式把当前行写入 title 字段", () => {
+    it("lineByLine 模式把当前行写入 artist 字段（QQ音乐式）", () => {
         const { channel, calls } = makeChannel();
         pushCarLyricLine(
             channel,
@@ -79,13 +79,13 @@ describe("车载蓝牙歌词 - 逐行标题模式（pushCarLyricLine）", () => 
             { lrc: "夜空中最亮的星", translation: "The brightest star" },
             false,
         );
-        expect(calls).toEqual([{ title: "夜空中最亮的星" }]);
+        expect(calls).toEqual([{ artist: "夜空中最亮的星" }]);
     });
 
-    it("lineByLine 模式无当前行时清空 title 覆盖（恢复原始元数据）", () => {
+    it("lineByLine 模式无当前行时清空 artist 覆盖（恢复原始元数据）", () => {
         const { channel, calls } = makeChannel();
         pushCarLyricLine(channel, "lineByLine", null, true);
-        expect(calls).toEqual([{ title: "" }]);
+        expect(calls).toEqual([{ artist: "" }]);
     });
 
     it("fullLyric 模式不逐行推送", () => {
@@ -130,10 +130,10 @@ describe("车载蓝牙歌词 - 完整歌词模式（pushCarLyricFullLyric）", (
 });
 
 describe("车载蓝牙歌词 - 恢复原始元数据（resetCarLyric）", () => {
-    it("清空 title 与 lyric 两个字段的覆盖", () => {
+    it("清空 title、artist 与 lyric 三个字段的覆盖", () => {
         const { channel, calls } = makeChannel();
         resetCarLyric(channel);
-        expect(calls).toEqual([{ title: "", lyric: "" }]);
+        expect(calls).toEqual([{ title: "", artist: "", lyric: "" }]);
     });
 
     it("原生通道缺失时静默降级", () => {

@@ -278,7 +278,7 @@
     "basicSettings.lyric.showStatusBarLyric": "开启桌面歌词",
     "basicSettings.lyric.showCarLyric": "车载蓝牙歌词",
     "basicSettings.lyric.carLyric.off": "关闭",
-    "basicSettings.lyric.carLyric.lineByLine": "逐行标题（兼容所有车机）",
+    "basicSettings.lyric.carLyric.lineByLine": "逐行歌词（QQ音乐式，写入歌手栏）",
     "basicSettings.lyric.carLyric.fullLyric": "完整歌词（需车机支持）",
     "basicSettings.lyric.align": "对齐方式",
     "basicSettings.lyric.align.left": "左对齐",
