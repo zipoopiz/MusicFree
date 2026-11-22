@@ -43,6 +43,7 @@ export interface IAppConfigProperties {
     "lyric.fontSize": number;
     "lyric.detailFontSize": number;
     "lyric.autoSearchLyric": boolean;
+    "lyric.showCarLyric": "off" | "lineByLine" | "fullLyric";
 
     // Theme
     "theme.background": string;

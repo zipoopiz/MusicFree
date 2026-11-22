@@ -14,9 +14,16 @@ import { checkAndCreateDir } from "@/utils/fileUtils";
 import PersistStatus from "@/utils/persistStatus";
 import CryptoJs from "crypto-js";
 import { unlink, writeFile } from "react-native-fs";
-import RNTrackPlayer, { Event } from "react-native-track-player";
+import RNTrackPlayer, { Event, State } from "react-native-track-player";
 import { TrackPlayerEvents } from "@/core.defination/trackPlayer";
 import { IPluginManager } from "@/types/core/pluginManager";
+import { getCarLyricChannel } from "@/native/carLyric";
+import {
+    pushCarLyricFullLyric,
+    pushCarLyricLine,
+    resetCarLyric,
+    type CarLyricMode,
+} from "./carLyric";
 
 
 interface ILyricState {
@@ -43,6 +50,11 @@ class LyricManager implements IInjectable {
     private pluginManager!: IPluginManager;
 
     private lyricParser: LyricParser | null = null;
+
+    /** 车载蓝牙歌词模式（off/lineByLine/fullLyric），未配置视为 off */
+    private get carLyricMode(): CarLyricMode {
+        return this.appConfig.getConfig("lyric.showCarLyric") ?? "off";
+    }
 
 
     get currentLyricItem() {
@@ -72,6 +84,9 @@ class LyricManager implements IInjectable {
                     LyricUtil.setStatusBarLyricText("MusicFree");
                 }
             }
+
+            // 车载蓝牙歌词：切歌时先恢复原始元数据，完整歌词/当前行在歌词就绪后重新推送
+            resetCarLyric(getCarLyricChannel());
         });
 
         RNTrackPlayer.addEventListener(Event.PlaybackProgressUpdated, evt => {
@@ -99,6 +114,27 @@ class LyricManager implements IInjectable {
                             : ""),
                     );
                 }
+
+                // 更新车载蓝牙歌词（逐行标题模式）
+                pushCarLyricLine(
+                    getCarLyricChannel(),
+                    this.carLyricMode,
+                    newLyricItem,
+                    !!showTranslation,
+                );
+            }
+        });
+
+        // 车载蓝牙歌词：暂停/停止时恢复原始元数据，恢复播放后重新推送当前状态
+        RNTrackPlayer.addEventListener(Event.PlaybackState, evt => {
+            if (evt.state === State.Playing) {
+                this.syncCarLyric();
+            } else if (
+                evt.state === State.Paused ||
+                evt.state === State.Stopped ||
+                evt.state === State.Ended
+            ) {
+                resetCarLyric(getCarLyricChannel());
             }
         });
 
@@ -244,6 +280,9 @@ class LyricManager implements IInjectable {
             const musicItem = this.trackPlayer.currentMusic;
             LyricUtil.setStatusBarLyricText(musicItem ? `${musicItem.title} - ${musicItem.artist}` : "MusicFree");
         }
+
+        // 车载蓝牙歌词：无歌词时恢复原始元数据
+        resetCarLyric(getCarLyricChannel());
     }
 
     private async refreshLyric(skipFetchLyricSourceIfSame: boolean = true, ignoreProgress: boolean = false) {
@@ -324,6 +363,9 @@ class LyricManager implements IInjectable {
                     LyricUtil.setStatusBarLyricText(musicItem ? `${musicItem.title} - ${musicItem.artist}` : "MusicFree");
                 }
             }
+
+            // 更新车载蓝牙歌词
+            this.syncCarLyric();
         } catch (err) {
             if (this.trackPlayer.isCurrentMusic(currentMusicItem)) {
                 this.lyricParser = null;
@@ -333,9 +375,59 @@ class LyricManager implements IInjectable {
     }
 
     /**
+     * 按当前车载歌词模式推送歌词状态：模式关闭或当前歌词不属于正在播放的歌曲时，
+     * 恢复原始元数据；否则完整歌词模式推送整篇歌词、逐行标题模式推送当前行。
+     * 仅在播放中调用（暂停/停止走 resetCarLyric）。
+     */
+    private syncCarLyric() {
+        const channel = getCarLyricChannel();
+        const mode = this.carLyricMode;
+        const parser = this.lyricParser;
+        const hasCurrentLyric =
+            !!parser && this.trackPlayer.isCurrentMusic(parser.musicItem);
+
+        if (mode === "off" || !hasCurrentLyric) {
+            resetCarLyric(channel);
+            return;
+        }
+
+        if (mode === "fullLyric") {
+            pushCarLyricFullLyric(
+                channel,
+                mode,
+                parser.lyricSource?.rawLrc ?? null,
+            );
+        } else if (mode === "lineByLine") {
+            pushCarLyricLine(
+                channel,
+                mode,
+                this.currentLyricItem,
+                !!PersistStatus.get("lyric.showTranslation"),
+            );
+        }
+    }
+
+    /**
+     * 车载蓝牙歌词模式切换后重新应用：清空旧覆盖，并按新模式推送当前歌词状态。
+     * 暂停等非播放状态下保持原始元数据，不注入歌词。
+     */
+    async reapplyCarLyric() {
+        const isPlaying = await RNTrackPlayer.getPlaybackState()
+            .then(state => state.state === State.Playing)
+            .catch(() => false);
+
+        if (!isPlaying) {
+            resetCarLyric(getCarLyricChannel());
+            return;
+        }
+
+        this.syncCarLyric();
+    }
+
+    /**
      * 检索最接近的歌词
-     * @param musicItem 
-     * @returns 
+     * @param musicItem
+     * @returns
      */
     private async searchSimilarLyric(musicItem: IMusic.IMusicItem) {
         const keyword = musicItem.alias || musicItem.title;

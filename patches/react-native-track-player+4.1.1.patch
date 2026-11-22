@@ -1,0 +1,179 @@
+diff --git a/node_modules/react-native-track-player/android/build.gradle b/node_modules/react-native-track-player/android/build.gradle
+index ac33473..bf8ad55 100644
+--- a/node_modules/react-native-track-player/android/build.gradle
++++ b/node_modules/react-native-track-player/android/build.gradle
+@@ -62,4 +62,7 @@ dependencies {
+     implementation "androidx.localbroadcastmanager:localbroadcastmanager:1.1.0"
+     implementation "androidx.lifecycle:lifecycle-process:2.5.1"
+     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.3"
++
++    // MusicFree patch（车载蓝牙歌词）：MediaSessionConnector 所在的 ExoPlayer mediasession 扩展
++    implementation "com.google.android.exoplayer:extension-mediasession:2.19.0"
+ }
+diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
+index b2409a0..1b61ec0 100644
+--- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
++++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
+@@ -374,6 +374,17 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
+         callback.resolve(null)
+     }
+ 
++    @ReactMethod
++    fun updateNowPlayingTitles(map: ReadableMap?, callback: Promise) = scope.launch {
++        if (verifyServiceBoundOrReject(callback)) return@launch
++
++        Arguments.toBundle(map)?.let {
++            musicService.updateNowPlayingTitles(it)
++        }
++
++        callback.resolve(null)
++    }
++
+     @ReactMethod
+     fun removeUpcomingTracks(callback: Promise) = scope.launch {
+         if (verifyServiceBoundOrReject(callback)) return@launch
+diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
+index 9d6d869..2f08482 100644
+--- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
++++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
+@@ -9,7 +9,10 @@ import android.os.Binder
+ import android.os.Build
+ import android.os.Bundle
+ import android.os.IBinder
++import android.support.v4.media.MediaMetadataCompat
+ import android.support.v4.media.RatingCompat
++import android.support.v4.media.session.MediaSessionCompat
++import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
+ import androidx.annotation.MainThread
+ import androidx.core.app.NotificationCompat
+ import androidx.core.app.NotificationCompat.PRIORITY_LOW
+@@ -37,6 +40,7 @@ import com.google.android.exoplayer2.ui.R as ExoPlayerR
+ import kotlinx.coroutines.*
+ import kotlinx.coroutines.flow.flow
+ import java.util.concurrent.TimeUnit
++import java.lang.reflect.Field
+ import kotlin.system.exitProcess
+ import timber.log.Timber
+ 
+@@ -93,6 +97,13 @@ class MusicService : HeadlessJsTaskService() {
+     private var notificationCapabilities: List<Capability> = emptyList()
+     private var compactCapabilities: List<Capability> = emptyList()
+ 
++    /**************** 车载蓝牙歌词（MusicFree patch） ****************/
++    // 覆盖状态绑定当前曲目的 audioUrl：切歌后自动失效，由 JS 在歌词就绪后重新推送
++    private var carLyricBoundUrl: String? = null
++    private var carLyricTitle: String? = null
++    private var carLyricLyric: String? = null
++    private var carLyricProviderInstalled = false
++
+     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+         startTask(getTaskConfig(intent))
+         startAndStopEmptyNotificationToAvoidANR()
+@@ -441,6 +452,107 @@ class MusicService : HeadlessJsTaskService() {
+         player.notificationManager.hideNotification()
+     }
+ 
++    /**
++     * 车载蓝牙歌词：更新媒体会话元数据（经蓝牙 AVRCP 同步给车机）。
++     * - title: 当前行歌词，覆盖会话元数据的 title 字段（系统通知仍显示歌名）；
++     * - lyric: 整篇歌词，写入会话元数据的歌词字段，由支持解析的车机自行滚动显示。
++     * 空字符串表示清除对应字段的覆盖，恢复原始元数据。
++     */
++    @MainThread
++    fun updateNowPlayingTitles(titles: Bundle) {
++        if (!::player.isInitialized) return
++        carLyricBoundUrl = (player.currentItem as? TrackAudioItem)?.audioUrl
++        carLyricTitle = titles.getString("title")?.takeIf { it.isNotEmpty() }
++        carLyricLyric = titles.getString("lyric")?.takeIf { it.isNotEmpty() }
++        installCarLyricMetadataProvider()
++        applyCarLyricNow()
++    }
++
++    /**
++     * 接管 MediaSessionConnector 的元数据提供器：连接器每次刷新会话元数据时都会调用它，
++     * 保证歌词字段在所有刷新中存活。mediaSessionConnector 在 kotlinaudio 中为 private，
++     * 通过反射获取；kotlinaudio 版本由 react-native-track-player 锁定，反射失败时静默降级
++     * （仅车载歌词不可用，不影响播放）。
++     */
++    private fun installCarLyricMetadataProvider() {
++        if (carLyricProviderInstalled || !::player.isInitialized) return
++        try {
++            val connector = findPrivateField(player::class.java, "mediaSessionConnector")
++                .get(player) as MediaSessionConnector
++            connector.setMediaMetadataProvider { buildCarLyricMetadata() }
++            carLyricProviderInstalled = true
++        } catch (error: Exception) {
++            Timber.e(error, "Car lyric: failed to install media metadata provider")
++        }
++    }
++
++    private fun buildCarLyricMetadata(): MediaMetadataCompat {
++        val base = player.notificationManager.getMediaMetadataCompat()
++        val bound = carLyricBoundUrl != null &&
++            (player.currentItem as? TrackAudioItem)?.audioUrl == carLyricBoundUrl
++        if (!bound) return base
++
++        var metadata = base
++        carLyricTitle?.let {
++            metadata = metadata.withString(MediaMetadataCompat.METADATA_KEY_TITLE, it)
++            metadata = metadata.withString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, it)
++        }
++        carLyricLyric?.let {
++            metadata = metadata.withString("android.media.metadata.LYRICS", it)
++        }
++        return metadata
++    }
++
++    /** 复制原元数据的全部字段并写入一个字符串字段（MediaMetadataCompat.Builder 无复制构造） */
++    private fun MediaMetadataCompat.withString(key: String, value: String): MediaMetadataCompat {
++        val builder = MediaMetadataCompat.Builder()
++        for (k in keySet()) {
++            when (k) {
++                MediaMetadataCompat.METADATA_KEY_DURATION,
++                MediaMetadataCompat.METADATA_KEY_TRACK_NUMBER,
++                MediaMetadataCompat.METADATA_KEY_NUM_TRACKS,
++                MediaMetadataCompat.METADATA_KEY_DISC_NUMBER,
++                MediaMetadataCompat.METADATA_KEY_YEAR -> builder.putLong(k, getLong(k))
++                else -> {
++                    val bitmap = getBitmap(k)
++                    val rating = getRating(k)
++                    val text = getString(k)
++                    when {
++                        bitmap != null -> builder.putBitmap(k, bitmap)
++                        rating != null -> builder.putRating(k, rating)
++                        text != null -> builder.putString(k, text)
++                    }
++                }
++            }
++        }
++        builder.putString(key, value)
++        return builder.build()
++    }
++
++    @MainThread
++    private fun applyCarLyricNow() {
++        if (!carLyricProviderInstalled || !::player.isInitialized) return
++        try {
++            val session = findPrivateField(player::class.java, "mediaSession")
++                .get(player) as MediaSessionCompat
++            session.setMetadata(buildCarLyricMetadata())
++        } catch (error: Exception) {
++            Timber.e(error, "Car lyric: failed to apply media metadata")
++        }
++    }
++
++    private fun findPrivateField(clazz: Class<*>, name: String): Field {
++        var target: Class<*>? = clazz
++        while (target != null) {
++            try {
++                return target.getDeclaredField(name)
++            } catch (ignored: NoSuchFieldException) {
++                target = target.superclass
++            }
++        }
++        throw NoSuchFieldException(name)
++    }
++
+     private fun emitPlaybackTrackChangedEvents(
+         index: Int?,
+         previousIndex: Int?,

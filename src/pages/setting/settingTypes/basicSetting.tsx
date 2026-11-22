@@ -9,6 +9,7 @@ import { SortType } from "@/constants/commonConst.ts";
 import pathConst from "@/constants/pathConst";
 import Config, { useAppConfig } from "@/core/appConfig";
 import { useI18N } from "@/core/i18n";
+import lyricManager from "@/core/lyricManager";
 import { ROUTE_PATH, useNavigate } from "@/core/router";
 import useColors from "@/hooks/useColors";
 import LyricUtil, { NativeTextAlignment } from "@/native/lyricUtil";
@@ -21,7 +22,7 @@ import Toast from "@/utils/toast";
 import Clipboard from "@react-native-clipboard/clipboard";
 import Slider from "@react-native-community/slider";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { SectionList, StyleSheet, TouchableOpacity, View } from "react-native";
+import { Platform, SectionList, StyleSheet, TouchableOpacity, View } from "react-native";
 import { readdir } from "react-native-fs";
 import { FlatList, ScrollView } from "react-native-gesture-handler";
 
@@ -683,6 +684,7 @@ function LyricSetting() {
     const widthPercent = useAppConfig("lyric.widthPercent");
     const fontSize = useAppConfig("lyric.fontSize");
     const enableAutoSearchLyric = useAppConfig("lyric.autoSearchLyric");
+    const carLyricMode = useAppConfig("lyric.showCarLyric");
 
 
 
@@ -734,6 +736,22 @@ function LyricSetting() {
         },
     );
 
+    const showCarLyric = createRadio(
+        t("basicSettings.lyric.showCarLyric"),
+        "lyric.showCarLyric",
+        ["off", "lineByLine", "fullLyric"],
+        carLyricMode ?? "off",
+        {
+            off: t("basicSettings.lyric.carLyric.off"),
+            lineByLine: t("basicSettings.lyric.carLyric.lineByLine"),
+            fullLyric: t("basicSettings.lyric.carLyric.fullLyric"),
+        },
+        () => {
+            // 切换模式后清空旧覆盖，并按新模式重新推送当前歌词状态
+            lyricManager.reapplyCarLyric();
+        },
+    );
+
     const alignStatusBarLyric = createRadio(
         t("basicSettings.lyric.align"),
         "lyric.align",
@@ -771,6 +789,15 @@ function LyricSetting() {
                 <ListItem.Content title={openStatusBarLyric.title} />
                 {openStatusBarLyric.right}
             </ListItem>
+            {Platform.OS === "android" && (
+                <ListItem
+                    withHorizontalPadding
+                    heightType="small"
+                    onPress={showCarLyric.onPress}>
+                    <ListItem.Content title={showCarLyric.title} />
+                    {showCarLyric.right}
+                </ListItem>
+            )}
             <View style={lyricStyles.sliderContainer}>
                 <ThemeText>{t("basicSettings.lyric.leftRightDistance")}</ThemeText>
                 <Slider
