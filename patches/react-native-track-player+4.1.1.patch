@@ -33,7 +33,7 @@ index b2409a0..1b61ec0 100644
      fun removeUpcomingTracks(callback: Promise) = scope.launch {
          if (verifyServiceBoundOrReject(callback)) return@launch
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
-index 9d6d869..2f08482 100644
+index 9d6d869..8fab66b 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 @@ -9,7 +9,10 @@ import android.os.Binder
@@ -166,7 +166,7 @@ index 9d6d869..2f08482 100644
 +        var target: Class<*>? = clazz
 +        while (target != null) {
 +            try {
-+                return target.getDeclaredField(name)
++                return target.getDeclaredField(name).apply { isAccessible = true }
 +            } catch (ignored: NoSuchFieldException) {
 +                target = target.superclass
 +            }
