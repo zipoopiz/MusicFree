@@ -45,6 +45,9 @@ jobs:
           RELEASE_KEY_PASSWORD=musicfreelocal
           EOF
 
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
       - name: Build release APK
         run: |
           cd android
