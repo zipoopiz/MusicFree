@@ -1,6 +1,6 @@
 # 0001 - 用 patch-package 给 react-native-track-player 打原生补丁，而非 fork
 
-车载歌词的两种模式（逐行歌词、完整歌词）都需要在不改动播放队列的前提下直接更新 Android MediaSession 元数据：完整歌词模式要写入自定义字段 `android.media.metadata.LYRICS`，逐行歌词模式要把当前行写入会话元数据的 artist/副标题字段（QQ音乐同款——歌名保持不变，车机渲染「歌名 + 歌手」时即显示歌词）。官方 react-native-track-player v4.1.1 既没有对应 API，也不向外暴露其内部 MediaSessionCompat，纯 TS 侧无法实现（`updateMetadataForTrack` 会连队列条目和系统通知一起改动）。**决定**：引入 patch-package 维护一个小型补丁（为 track-player 增加原生方法 `updateNowPlayingTitles`，通过接管 MediaSessionConnector 的元数据提供器向当前媒体会话写入 artist/title 覆盖与 LYRICS 字段），并在 `package.json` 保留 postinstall 脚本。
+车载歌词的三条通道（逐行歌词、完整歌词、ucar 合作车机）都需要在不改动播放队列的前提下直接更新 Android MediaSession 元数据：逐行歌词模式要把当前行写入会话元数据的标题字段、把「歌名-歌手」写入歌手字段（反编译 QQ 音乐 APK 确认的同款布局——歌词占据 AVRCP 主显示位）；完整歌词模式与 ucar 合作车机通道要写入 `android.media.metadata.LYRIC(S)` 与 `ucar.media.metadata.*` 自定义字段。官方 react-native-track-player v4.1.1 既没有对应 API，也不向外暴露其内部 MediaSessionCompat，纯 TS 侧无法实现（`updateMetadataForTrack` 会连队列条目和系统通知一起改动）。**决定**：引入 patch-package 维护一个小型补丁（为 track-player 增加原生方法 `updateNowPlayingTitles`，通过接管 MediaSessionConnector 的元数据提供器向当前媒体会话写入 title/artist/lyric/ucar 覆盖），并在 `package.json` 保留 postinstall 脚本。
 
 ## Considered Options
 

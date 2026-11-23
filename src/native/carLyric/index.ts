@@ -18,7 +18,16 @@ export function getCarLyricChannel(): ICarLyricChannel | null {
     return {
         updateNowPlayingTitles: titles => {
             // 原生调用失败（如服务未就绪）时静默降级，不影响播放
-            Promise.resolve(updateNowPlayingTitles(titles)).catch(() => { });
+            Promise.resolve(updateNowPlayingTitles(titles))
+                .then(supported => {
+                    if (supported === false) {
+                        // 反射接管 MediaSession 失败：仅车载歌词不可用，播放不受影响
+                        console.warn(
+                            "[carLyric] native metadata channel not active (provider install/apply failed)",
+                        );
+                    }
+                })
+                .catch(() => { });
         },
     };
 }

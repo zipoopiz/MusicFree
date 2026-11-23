@@ -19,8 +19,8 @@ import { TrackPlayerEvents } from "@/core.defination/trackPlayer";
 import { IPluginManager } from "@/types/core/pluginManager";
 import { getCarLyricChannel } from "@/native/carLyric";
 import {
-    pushCarLyricFullLyric,
     pushCarLyricLine,
+    pushCarLyricTrackInfo,
     resetCarLyric,
     type CarLyricMode,
 } from "./carLyric";
@@ -115,12 +115,13 @@ class LyricManager implements IInjectable {
                     );
                 }
 
-                // 更新车载蓝牙歌词（逐行标题模式）
+                // 更新车载蓝牙歌词（逐行模式：TITLE=歌词行、ARTIST=「歌名-歌手」）
                 pushCarLyricLine(
                     getCarLyricChannel(),
                     this.carLyricMode,
                     newLyricItem,
                     !!showTranslation,
+                    parser.musicItem,
                 );
             }
         });
@@ -391,18 +392,22 @@ class LyricManager implements IInjectable {
             return;
         }
 
-        if (mode === "fullLyric") {
-            pushCarLyricFullLyric(
-                channel,
-                mode,
-                parser.lyricSource?.rawLrc ?? null,
-            );
-        } else if (mode === "lineByLine") {
+        // QQ 音乐式：歌词就绪即推送整篇歌词与真实歌曲信息（ucar 合作车机通道），
+        // 两种模式都推送——车机支持哪个通道就消费哪个
+        pushCarLyricTrackInfo(
+            channel,
+            mode,
+            parser.lyricSource?.rawLrc ?? null,
+            parser.musicItem,
+        );
+
+        if (mode === "lineByLine") {
             pushCarLyricLine(
                 channel,
                 mode,
                 this.currentLyricItem,
                 !!PersistStatus.get("lyric.showTranslation"),
+                parser.musicItem,
             );
         }
     }

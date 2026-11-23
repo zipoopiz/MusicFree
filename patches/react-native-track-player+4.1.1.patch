@@ -11,7 +11,7 @@ index ac33473..bf8ad55 100644
 +    implementation "com.google.android.exoplayer:extension-mediasession:2.19.0"
  }
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
-index b2409a0..1b61ec0 100644
+index b2409a0..c838a78 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
 @@ -374,6 +374,17 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
@@ -22,18 +22,18 @@ index b2409a0..1b61ec0 100644
 +    fun updateNowPlayingTitles(map: ReadableMap?, callback: Promise) = scope.launch {
 +        if (verifyServiceBoundOrReject(callback)) return@launch
 +
-+        Arguments.toBundle(map)?.let {
++        val supported = Arguments.toBundle(map)?.let {
 +            musicService.updateNowPlayingTitles(it)
-+        }
++        } ?: false
 +
-+        callback.resolve(null)
++        callback.resolve(supported)
 +    }
 +
      @ReactMethod
      fun removeUpcomingTracks(callback: Promise) = scope.launch {
          if (verifyServiceBoundOrReject(callback)) return@launch
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
-index 9d6d869..7982539 100644
+index 9d6d869..fd88c4d 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 @@ -9,7 +9,10 @@ import android.os.Binder
@@ -55,59 +55,75 @@ index 9d6d869..7982539 100644
  import kotlin.system.exitProcess
  import timber.log.Timber
  
-@@ -93,6 +97,14 @@ class MusicService : HeadlessJsTaskService() {
+@@ -93,6 +97,18 @@ class MusicService : HeadlessJsTaskService() {
      private var notificationCapabilities: List<Capability> = emptyList()
      private var compactCapabilities: List<Capability> = emptyList()
  
-+    /**************** 车载蓝牙歌词（MusicFree patch） ****************/
++    /**************** 车载蓝牙歌词（MusicFree patch，QQ音乐同款多通道） ****************/
 +    // 覆盖状态绑定当前曲目的 audioUrl：切歌后自动失效，由 JS 在歌词就绪后重新推送
 +    private var carLyricBoundUrl: String? = null
 +    private var carLyricTitle: String? = null
 +    private var carLyricArtist: String? = null
 +    private var carLyricLyric: String? = null
-+    private var carLyricProviderInstalled = false
++    private var carLyricSongName: String? = null
++    private var carLyricSinger: String? = null
++    private var carLyricSongId: String? = null
++    // 已安装元数据提供器的 player 实例：player 重建（如重新 setupPlayer）后需要重新安装
++    private var carLyricInstalledOnPlayer: Any? = null
 +
      override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
          startTask(getTaskConfig(intent))
          startAndStopEmptyNotificationToAvoidANR()
-@@ -441,6 +453,114 @@ class MusicService : HeadlessJsTaskService() {
+@@ -441,6 +457,144 @@ class MusicService : HeadlessJsTaskService() {
          player.notificationManager.hideNotification()
      }
  
 +    /**
 +     * 车载蓝牙歌词：更新媒体会话元数据（经蓝牙 AVRCP 同步给车机）。
-+     * - artist: 当前行歌词（QQ音乐式），覆盖会话元数据的 artist/副标题字段，
-+     *   歌名保持不变，车机渲染「歌名 + 歌手」时即显示歌词；
-+     * - title: 备用通道，覆盖会话元数据的 title 字段；
-+     * - lyric: 整篇歌词，写入会话元数据的歌词字段，由支持解析的车机自行滚动显示。
++     * 通道布局完全对齐 QQ 音乐（反编译 QQ 音乐 APK `mediasession.s` 得出）：
++     * - title: 覆盖标题字段。QQ音乐式 = 当前歌词行（歌词占据 AVRCP 主显示位）；
++     * - artist: 覆盖歌手字段。QQ音乐式 = 「歌名-歌手」，真实歌名挪到歌手位；
++     * - lyric: 整篇歌词，落到 LYRIC(S) 与 ucar LYRICS_WHOLE，由支持解析的车机滚动显示；
++     * - songName/singer/songId: 真实歌曲信息，落到 ucar 通道字段与 MEDIA_ID，
++     *   供 QQ 音乐合作车机（只读 ucar 字段）展示真实歌曲信息并滚动歌词。
 +     * 空字符串表示清除对应字段的覆盖，恢复原始元数据。
++     * 返回车载歌词原生链路是否完全生效（供 JS 侧诊断静默降级）。
 +     */
 +    @MainThread
-+    fun updateNowPlayingTitles(titles: Bundle) {
-+        if (!::player.isInitialized) return
++    fun updateNowPlayingTitles(titles: Bundle): Boolean {
++        if (!::player.isInitialized) return false
++        fun pick(key: String) = titles.getString(key)?.takeIf { it.isNotEmpty() }
 +        carLyricBoundUrl = (player.currentItem as? TrackAudioItem)?.audioUrl
-+        carLyricTitle = titles.getString("title")?.takeIf { it.isNotEmpty() }
-+        carLyricArtist = titles.getString("artist")?.takeIf { it.isNotEmpty() }
-+        carLyricLyric = titles.getString("lyric")?.takeIf { it.isNotEmpty() }
-+        installCarLyricMetadataProvider()
-+        applyCarLyricNow()
++        carLyricTitle = pick("title")
++        carLyricArtist = pick("artist")
++        carLyricLyric = pick("lyric")
++        carLyricSongName = pick("songName")
++        carLyricSinger = pick("singer")
++        carLyricSongId = pick("songId")
++        val installed = installCarLyricMetadataProvider()
++        val applied = applyCarLyricNow()
++        return installed && applied
 +    }
 +
 +    /**
 +     * 接管 MediaSessionConnector 的元数据提供器：连接器每次刷新会话元数据时都会调用它，
 +     * 保证歌词字段在所有刷新中存活。mediaSessionConnector 在 kotlinaudio 中为 private，
 +     * 通过反射获取；kotlinaudio 版本由 react-native-track-player 锁定，反射失败时静默降级
-+     * （仅车载歌词不可用，不影响播放）。
++     * （仅车载歌词不可用，不影响播放）。player 重建后按实例重新安装。
 +     */
-+    private fun installCarLyricMetadataProvider() {
-+        if (carLyricProviderInstalled || !::player.isInitialized) return
-+        try {
++    private fun installCarLyricMetadataProvider(): Boolean {
++        if (!::player.isInitialized) return false
++        if (carLyricInstalledOnPlayer === player) return true
++        return try {
 +            val connector = findPrivateField(player::class.java, "mediaSessionConnector")
 +                .get(player) as MediaSessionConnector
 +            connector.setMediaMetadataProvider { buildCarLyricMetadata() }
-+            carLyricProviderInstalled = true
-+        } catch (error: Exception) {
++            carLyricInstalledOnPlayer = player
++            Timber.i("Car lyric: media metadata provider installed")
++            true
++        } catch (error: Throwable) {
 +            Timber.e(error, "Car lyric: failed to install media metadata provider")
++            false
 +        }
 +    }
 +
@@ -118,6 +134,7 @@ index 9d6d869..7982539 100644
 +        if (!bound) return base
 +
 +        var metadata = base
++        // 主通道（QQ音乐式）：TITLE=当前歌词行、ARTIST=「歌名-歌手」
 +        carLyricTitle?.let {
 +            metadata = metadata.withString(MediaMetadataCompat.METADATA_KEY_TITLE, it)
 +            metadata = metadata.withString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, it)
@@ -126,7 +143,22 @@ index 9d6d869..7982539 100644
 +            metadata = metadata.withString(MediaMetadataCompat.METADATA_KEY_ARTIST, it)
 +            metadata = metadata.withString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, it)
 +        }
++        // ucar 合作车机通道：真实歌曲信息 + MEDIA_ID（QQ 音乐 z() 同款，曲目内保持稳定）
++        carLyricSongName?.let {
++            metadata = metadata.withString("ucar.media.metadata.UCAR_TITLE", it)
++        }
++        carLyricSinger?.let {
++            metadata = metadata.withString("ucar.media.metadata.UCAR_ARTIST", it)
++        }
++        carLyricSongId?.let {
++            metadata = metadata.withString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, it)
++        }
++        // 整篇歌词通道：QQ 音乐在 Android 16+ 写 LYRIC，合作车机读 LYRICS_WHOLE
 +        carLyricLyric?.let {
++            metadata = metadata.withString("ucar.media.metadata.LYRICS_WHOLE", it)
++            if (Build.VERSION.SDK_INT >= 36) {
++                metadata = metadata.withString("android.media.metadata.LYRIC", it)
++            }
 +            metadata = metadata.withString("android.media.metadata.LYRICS", it)
 +        }
 +        return metadata
@@ -159,14 +191,16 @@ index 9d6d869..7982539 100644
 +    }
 +
 +    @MainThread
-+    private fun applyCarLyricNow() {
-+        if (!carLyricProviderInstalled || !::player.isInitialized) return
-+        try {
++    private fun applyCarLyricNow(): Boolean {
++        if (!::player.isInitialized) return false
++        return try {
 +            val session = findPrivateField(player::class.java, "mediaSession")
 +                .get(player) as MediaSessionCompat
 +            session.setMetadata(buildCarLyricMetadata())
-+        } catch (error: Exception) {
++            true
++        } catch (error: Throwable) {
 +            Timber.e(error, "Car lyric: failed to apply media metadata")
++            false
 +        }
 +    }
 +
