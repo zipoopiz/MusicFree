@@ -19,6 +19,7 @@ import { TrackPlayerEvents } from "@/core.defination/trackPlayer";
 import { IPluginManager } from "@/types/core/pluginManager";
 import { getCarLyricChannel } from "@/native/carLyric";
 import {
+    CAR_LYRIC_ADVANCE_MS,
     pushCarLyricLine,
     pushCarLyricTrackInfo,
     resetCarLyric,
@@ -51,9 +52,18 @@ class LyricManager implements IInjectable {
 
     private lyricParser: LyricParser | null = null;
 
+    /** 车载通道最近一次推送的歌词行文本：与 App 内当前行独立追踪，避免提前量引入的重复推送 */
+    private lastPushedCarLyricLrc: string | null | undefined = undefined;
+
     /** 车载蓝牙歌词模式（off/lineByLine/fullLyric），未配置视为 off */
     private get carLyricMode(): CarLyricMode {
         return this.appConfig.getConfig("lyric.showCarLyric") ?? "off";
+    }
+
+    /** 恢复车载通道原始元数据，并清空推送状态 */
+    private resetCarLyricChannel() {
+        this.lastPushedCarLyricLrc = undefined;
+        resetCarLyric(getCarLyricChannel());
     }
 
 
@@ -86,7 +96,7 @@ class LyricManager implements IInjectable {
             }
 
             // 车载蓝牙歌词：切歌时先恢复原始元数据，完整歌词/当前行在歌词就绪后重新推送
-            resetCarLyric(getCarLyricChannel());
+            this.resetCarLyricChannel();
         });
 
         RNTrackPlayer.addEventListener(Event.PlaybackProgressUpdated, evt => {
@@ -114,12 +124,18 @@ class LyricManager implements IInjectable {
                             : ""),
                     );
                 }
+            }
 
-                // 更新车载蓝牙歌词（逐行模式：TITLE=歌词行、ARTIST=「歌名-歌手」）
+            // 车载蓝牙歌词（逐行模式）：按「进度 + 提前量」选行，独立于 App 内当前行推送，
+            // 提前补偿蓝牙 AVRCP 传输与车机渲染延迟（QQ 音乐按设备下发偏移的同款思路）
+            const showTranslation = PersistStatus.get("lyric.showTranslation");
+            const carLyricItem = parser.getPosition(evt.position + CAR_LYRIC_ADVANCE_MS);
+            if (carLyricItem?.lrc !== this.lastPushedCarLyricLrc) {
+                this.lastPushedCarLyricLrc = carLyricItem?.lrc ?? null;
                 pushCarLyricLine(
                     getCarLyricChannel(),
                     this.carLyricMode,
-                    newLyricItem,
+                    carLyricItem,
                     !!showTranslation,
                     parser.musicItem,
                 );
@@ -135,7 +151,7 @@ class LyricManager implements IInjectable {
                 evt.state === State.Stopped ||
                 evt.state === State.Ended
             ) {
-                resetCarLyric(getCarLyricChannel());
+                this.resetCarLyricChannel();
             }
         });
 
@@ -283,7 +299,7 @@ class LyricManager implements IInjectable {
         }
 
         // 车载蓝牙歌词：无歌词时恢复原始元数据
-        resetCarLyric(getCarLyricChannel());
+        this.resetCarLyricChannel();
     }
 
     private async refreshLyric(skipFetchLyricSourceIfSame: boolean = true, ignoreProgress: boolean = false) {
@@ -388,7 +404,7 @@ class LyricManager implements IInjectable {
             !!parser && this.trackPlayer.isCurrentMusic(parser.musicItem);
 
         if (mode === "off" || !hasCurrentLyric) {
-            resetCarLyric(channel);
+            this.resetCarLyricChannel();
             return;
         }
 
@@ -402,6 +418,8 @@ class LyricManager implements IInjectable {
         );
 
         if (mode === "lineByLine") {
+            // 恢复播放时先推当前真实行（无提前量），后续行由进度事件按提前量推送
+            this.lastPushedCarLyricLrc = this.currentLyricItem?.lrc ?? null;
             pushCarLyricLine(
                 channel,
                 mode,
@@ -422,7 +440,7 @@ class LyricManager implements IInjectable {
             .catch(() => false);
 
         if (!isPlaying) {
-            resetCarLyric(getCarLyricChannel());
+            this.resetCarLyricChannel();
             return;
         }
 
