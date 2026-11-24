@@ -19,7 +19,7 @@ import { TrackPlayerEvents } from "@/core.defination/trackPlayer";
 import { IPluginManager } from "@/types/core/pluginManager";
 import { getCarLyricChannel } from "@/native/carLyric";
 import {
-    CAR_LYRIC_ADVANCE_MS,
+    CAR_LYRIC_ADVANCE_SEC,
     pushCarLyricLine,
     pushCarLyricTrackInfo,
     resetCarLyric,
@@ -129,7 +129,7 @@ class LyricManager implements IInjectable {
             // 车载蓝牙歌词（逐行模式）：按「进度 + 提前量」选行，独立于 App 内当前行推送，
             // 提前补偿蓝牙 AVRCP 传输与车机渲染延迟（QQ 音乐按设备下发偏移的同款思路）
             const showTranslation = PersistStatus.get("lyric.showTranslation");
-            const carLyricItem = parser.getPosition(evt.position + CAR_LYRIC_ADVANCE_MS);
+            const carLyricItem = parser.getPosition(evt.position + CAR_LYRIC_ADVANCE_SEC);
             if (carLyricItem?.lrc !== this.lastPushedCarLyricLrc) {
                 this.lastPushedCarLyricLrc = carLyricItem?.lrc ?? null;
                 pushCarLyricLine(

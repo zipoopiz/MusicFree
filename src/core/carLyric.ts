@@ -13,13 +13,14 @@
 export type CarLyricMode = "off" | "lineByLine" | "fullLyric";
 
 /**
- * 车载歌词提前量（毫秒）：按「播放进度 + 提前量」选取要推送的歌词行，
- * 补偿蓝牙 AVRCP 传输与车机端渲染的固有延迟。
+ * 车载歌词提前量（秒，与 LRC 时间戳 / 播放进度同单位）：按「播放进度 + 提前量」
+ * 选取要推送的歌词行，补偿蓝牙 AVRCP 传输与车机端渲染的固有延迟。
  * QQ 音乐按蓝牙设备名从服务端下发每设备偏移（RemoteLyricController 中
  * `播放进度 += SPIpcManager.getInt(设备名, 0)`），本项目简化为全局固定值：
  * 过小 → 歌词在句中/句末才显示；过大 → 歌词早于演唱出现。
+ * 注意：位置单位是秒，历史上曾误用毫秒值（3000）导致选行永远落在曲末最后一句。
  */
-export const CAR_LYRIC_ADVANCE_MS = 3000;
+export const CAR_LYRIC_ADVANCE_SEC = 3;
 
 /**
  * 原生通道：由 patch 后的 react-native-track-player 提供（见 ADR-0001）。
